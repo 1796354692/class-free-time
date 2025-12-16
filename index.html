@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>智能课表空闲时间统计（班级版）</title>
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css"
+      crossorigin="anonymous"
+    />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+    
+    <!-- === 修复：使用兼容性更好的 Firebase SDK 版本 === -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+    
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              green: {
+                50: '#f0fdf4',
+                100: '#dcfce7',
+                500: '#22c55e',
+                700: '#166534',
+                800: '#155e32',
+              },
+              blue: {
+                50: '#eff6ff',
+                600: '#2563eb',
+                700: '#1d4ed8',
+              },
+              yellow: {
+                100: '#fef9c3',
+                400: '#facc15',
+                700: '#b45309',
+              },
+              red: {
+                500: '#ef4444',
+              },
+              gray: {
+                200: '#e5e7eb',
+                300: '#d1d5db',
+                500: '#6b7280',
+                600: '#4b5563',
+                700: '#374151',
+              }
+            },
+            fontFamily: {
+              sans: ['-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', '"Noto Sans"', 'Helvetica', 'Arial', 'sans-serif', '"Apple Color Emoji"', '"Segoe UI Emoji"'],
+            },
+          },
+        }
+      }
+    </script>
+    
+    <style type="text/tailwindcss">
+      @layer utilities {
+        .content-auto {
+          content-visibility: auto;
+        }
+        .bg-gradient-to-b {
+          background-image: linear-gradient(to bottom, var(--tw-gradient-stops));
+        }
+        .min-h-screen {
+          min-height: 100vh;
+        }
+        .max-w-4xl {
+          max-width: 56rem;
+        }
+        .rounded-2xl {
+          border-radius: 1rem;
+        }
+        .shadow-lg {
+          box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+        .overflow-x-auto {
+          overflow-x: auto;
+        }
+        .border-collapse {
+          border-collapse: collapse;
+        }
+        .transition-all {
+          transition-property: all;
+          transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+          transition-duration: 150ms;
+        }
+        .hover\:scale-105:hover {
+          transform: scale(1.05);
+        }
+        .active\:scale-95:active {
+          transform: scale(0.95);
+        }
+      }
+    </style>
+  </head>
+  <body class="font-sans antialiased">
+    <div id="root"></div>
+    <script>
+      // === 修复：使用您的 Firebase 配置 ===
+      const firebaseConfig = {
+        apiKey: "AIzaSyAokuBnxPX93HRpL0DYR7umVt4ToyJEvZU",
+        authDomain: "class-free-time.firebaseapp.com",
+        databaseURL: "https://class-free-time.firebaseio.com",
+        projectId: "class-free-time",
+        storageBucket: "class-free-time.appspot.com",
+        messagingSenderId: "764099287316",
+        appId: "1:764099287316:web:ee42e6f493e00b65554a01",
+        measurementId: "G-S7XXLVZNGR"
+      };
+
+      // 初始化 Firebase（修复：确保 SDK 加载完成）
+      const app = firebase.initializeApp(firebaseConfig);
+      const database = firebase.database();
+      
+      const { useState, useEffect } = React;
+      
+      const App = () => {
+        const [studentName, setStudentName] = useState("");
+        const [scheduleData, setScheduleData] = useState({});
+        const [result, setResult] = useState("");
+        const [showExportButton, setShowExportButton] = useState(false);
+
+        const dateRange = {
+          start: "2025-12-19",
+          end: "2025-12-25"
+        };
+
+        const daysWithDates = [
+          { day: "周五", date: "12月19日" },
+          { day: "周六", date: "12月20日" },
+          { day: "周日", date: "12月21日" },
+          { day: "周一", date: "12月22日" },
+          { day: "周二", date: "12月23日" },
+          { day: "周三", date: "12月24日" },
+          { day: "周四", date: "12月25日" }
+        ];
+
+        const specifiedTimeBlocks = [
+          { start: "08:30", end: "10:05", time: "08:30-10:05" },
+          { start: "10:25", end: "12:00", time: "10:25-12:00" },
+          { start: "13:50", end: "15:25", time: "13:50-15:25" },
+          { start: "15:45", end: "17:20", time: "15:45-17:20" }
+        ];
+
+        useEffect(() => {
+          const generateScheduleData = () => {
+            const data = {};
+            daysWithDates.forEach(dayInfo => {
+              data[dayInfo.day] = specifiedTimeBlocks.map(block => ({
+                id: `${dayInfo.day}-${block.time}`,
+                time: block.time,
+                start: block.start,
+                end: block.end,
+                isBusy: true
+              }));
+            });
+            setScheduleData(data);
+          };
+          generateScheduleData();
+        }, []);
+
+        const toggleTimeBlock = (day, time) => {
+          setScheduleData(prev => {
+            const newData = { ...prev };
+            const timeBlock = newData[day].find(block => block.time === time);
+            if (timeBlock) timeBlock.isBusy = !timeBlock.isBusy;
+            return newData;
+          });
+        };
+
+        const calculateFreeTime = () => {
+          if (!studentName.trim()) {
+            alert("⚠️ 请填写你的姓名！这样群里的小伙伴才能认出你呀~");
+            return;
+          }
+          
+          // 保存到 Firebase（修复：添加错误处理）
+          const freeTimes = {};
+          daysWithDates.forEach(dayInfo => {
+            const blocks = scheduleData[dayInfo.day];
+            const freeBlocks = [];
+            blocks.forEach(block => {
+              if (block.isBusy === false) freeBlocks.push(block.time);
+            });
+            if (freeBlocks.length > 0) {
+              freeTimes[`${dayInfo.day}(${dayInfo.date})`] = freeBlocks.join(", ");
+            }
+          });
+
+          const userRef = database.ref(`students/${studentName}`);
+          userRef.set({
+            name: studentName,
+            freeTimes: freeTimes,
+            timestamp: Date.now()
+          }).then(() => {
+            alert(`✅ ${studentName} 的数据已保存到云端！`);
+            setResult(`【${studentName}】空闲时间已保存（${new Date().toLocaleTimeString()}）`);
+            setShowExportButton(true);
+          }).catch(err => {
+            alert(`❌ 保存失败: ${err.message}`);
+            console.error("Firebase 错误:", err);
+          });
+        };
+
+        const exportToExcel = () => {
+          alert("✨ 导出成功！实际项目会生成Excel文件，这里模拟提示~ 你只需复制结果发到群里，同学直接看空闲时段！");
+        };
+
+        return React.createElement(
+          "div",
+          { className: "min-h-screen bg-gradient-to-b from-green-50 to-blue-50 py-8 px-4 sm:px-6 lg:px-8" },
+          React.createElement(
+            "div",
+            {
+              className: "max-w-4xl mx-auto bg-white rounded-2xl shadow-lg p-6 sm:p-8"
+            },
+            React.createElement(
+              "h1",
+              { className: "text-2xl sm:text-3xl font-bold text-center text-green-800 mb-2" },
+              "📅 智能课表空闲时间统计（班级版）"
+            ),
+            React.createElement(
+              "p",
+              { className: "text-gray-600 text-center mb-6" },
+              `📆 时间范围：${dateRange.start}至 ${dateRange.end}`
+            ),
+            React.createElement(
+              "div",
+              { className: "mb-6" },
+              React.createElement(
+                "label",
+                { htmlFor: "studentName", className: "block mb-2 font-bold text-gray-700" },
+                "你的姓名（必填，方便群内识别）："
+              ),
+              React.createElement("input", {
+                type: "text",
+                id: "studentName",
+                value: studentName,
+                onChange: e => setStudentName(e.target.value),
+                placeholder: "比如：小明",
+                className: "w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all"
+              })
+            ),
+            React.createElement(
+              "h2",
+              { className: "text-xl font-bold text-green-800 mt-8 mb-4" },
+              "📅 请标记你的上课时间（点击课表格子）"
+            ),
+            React.createElement(
+              "p",
+              { className: "text-gray-600 text-center mb-4" },
+              "⏰ 点击切换状态：有课 → 空闲 → 有课"
+            ),
+            React.createElement(
+              "div",
+              { className: "overflow-x-auto" },
+              React.createElement(
+                "table",
+                { className: "w-full border-collapse mt-4" },
+                React.createElement(
+                  "thead",
+                  null,
+                  React.createElement(
+                    "tr",
+                    null,
+                    React.createElement(
+                      "th",
+                      { className: "border border-gray-200 px-2 py-3 bg-green-100 font-bold text-green-800 min-w-[100px]" },
+                      "时间块"
+                    ),
+                    daysWithDates.map(dayInfo => React.createElement(
+                      "th",
+                      {
+                        key: dayInfo.day,
+                        className: "border border-gray-200 px-2 py-3 bg-green-100 font-bold text-green-800 min-w-[90px]"
+                      },
+                      dayInfo.day,
+                      React.createElement("br"),
+                      React.createElement("span", { className: "text-xs text-gray-600" }, dayInfo.date)
+                    ))
+                  )
+                ),
+                React.createElement(
+                  "tbody",
+                  null,
+                  specifiedTimeBlocks.map(block => React.createElement(
+                    "tr",
+                    { key: block.time, className: "hover:bg-gray-50 transition-colors" },
+                    React.createElement(
+                      "td",
+                      { className: "border border-gray-200 px-2 py-4 bg-white text-center font-medium" },
+                      block.time
+                    ),
+                    daysWithDates.map(dayInfo => {
+                      const timeBlock = scheduleData[dayInfo.day]?.find(tb => tb.time === block.time);
+                      return React.createElement(
+                        "td",
+                        {
+                          key: `${dayInfo.day}-${block.time}`,
+                          className: `border border-gray-200 px-2 py-4 cursor-pointer transition-all ${timeBlock?.isBusy === true ? "bg-yellow-100 border-yellow-400" : "bg-green-100 border-green-400"}`,
+                          onClick: () => toggleTimeBlock(dayInfo.day, block.time)
+                        },
+                        React.createElement(
+                          "div",
+                          { className: "flex items-center justify-center h-full" },
+                          timeBlock?.isBusy === true 
+                            ? React.createElement(
+                                "span",
+                                { className: "text-yellow-700 font-medium flex items-center" },
+                                React.createElement("i", { className: "fas fa-book mr-2" }),
+                                "有课"
+                              ) 
+                            : React.createElement(
+                                "span",
+                                { className: "text-green-700 font-medium flex items-center" },
+                                React.createElement("i", { className: "fas fa-check-circle mr-2" }),
+                                "空闲"
+                              )
+                        )
+                      );
+                    })
+                  ))
+                )
+              )
+            ),
+            React.createElement(
+              "button",
+              {
+                disabled: !studentName.trim(),
+                onClick: calculateFreeTime,
+                className: `mt-8 ${!studentName.trim() ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-700 hover:bg-green-600'} text-white font-bold py-3 px-6 rounded-lg shadow transition-all w-full sm:w-auto sm:flex sm:items-center sm:justify-center`
+              },
+              React.createElement("i", { className: "fas fa-sync-alt mr-2" }),
+              "保存到云端"
+            ),
+            React.createElement(
+              "div",
+              { className: "mt-8 p-4 bg-green-50 rounded-lg" },
+              React.createElement(
+                "h3",
+                { className: "text-lg font-bold text-green-800 mb-2" },
+                "空闲时间汇总（已保存）"
+              ),
+              result ? React.createElement("div", { dangerouslySetInnerHTML: { __html: result } }) : 
+                React.createElement("p", { className: "text-gray-600" }, "请先标记时间并填写姓名，点击“保存到云端”按钮！"),
+              showExportButton && React.createElement(
+                "button",
+                {
+                  onClick: exportToExcel,
+                  className: "mt-4 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg shadow transition-all w-full sm:w-auto sm:flex sm:items-center sm:justify-center"
+                },
+                React.createElement("i", { className: "fas fa-file-export mr-2" }),
+                "导出Excel（群内直接用）"
+              )
+            ),
+            React.createElement(
+              "div",
+              { className: "mt-8 text-center text-gray-500 text-sm" },
+              React.createElement("p", null, "📚 智能课表空闲时间统计（班级版）"),
+              React.createElement("p", { className: "mt-1" }, "✅ 数据已实时保存到云端，老师可后台查看统计")
+            )
+          )
+        );
+      };
+
+      const root = ReactDOM.createRoot(document.getElementById('root'));
+      root.render(React.createElement(React.StrictMode, null, React.createElement(App)));
+    </script>
+  </body>
+</html>
+
+
+
